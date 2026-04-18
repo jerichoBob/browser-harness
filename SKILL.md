@@ -36,7 +36,6 @@ PY
 ```
 
 `run.py` calls `ensure_daemon()` before `exec` — you never start/stop manually unless you want to.
-
 ### Remote browsers
 
 Remote is optional. Use it for parallel agents, sub-agents, or deployment.
