@@ -68,8 +68,9 @@ def page_info():
             expression="JSON.stringify({url:location.href,title:document.title,w:innerWidth,h:innerHeight,sx:scrollX,sy:scrollY,pw:document.documentElement.scrollWidth,ph:document.documentElement.scrollHeight,blockers:(window.__bu_blockers__||[])})",
             returnByValue=True)
     info = json.loads(r["result"]["value"])
-    cdp_blockers = _send({"meta": "pending_blockers"}).get("blockers") or []
-    all_blockers = info.pop("blockers") + cdp_blockers
+    js_blockers = info.pop("blockers", None)
+    cdp_blockers = _send({"meta": "pending_blockers"}).get("blockers")
+    all_blockers = (js_blockers if isinstance(js_blockers, list) else []) + (cdp_blockers if isinstance(cdp_blockers, list) else [])
     if all_blockers:
         info["blockers"] = all_blockers
     return info
@@ -89,7 +90,11 @@ def pending_blockers(clear_js=False):
     """
     cdp_side = _send({"meta": "pending_blockers"}).get("blockers") or []
     js_expr = "(function(){const a=window.__bu_blockers__||[];" + ("window.__bu_blockers__=[];" if clear_js else "") + "return a;})()"
-    js_side = js(js_expr) or []
+    try:
+        raw = js(js_expr)
+    except Exception:
+        raw = None  # JS frozen (dialog), detached session, etc. — fall back to CDP-only
+    js_side = raw if isinstance(raw, list) else []
     return {"cdp": cdp_side, "js": js_side}
 
 # --- input ---

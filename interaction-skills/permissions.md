@@ -1,8 +1,14 @@
 # Permissions & OS-native popups
 
 Chrome renders permission prompts, file pickers, and print dialogs in **browser chrome**,
-not in the page. They are invisible to CDP page screenshots and to `Page.*` events.
-You can't click them with `Input.dispatchMouseEvent` — coordinates go to the viewport.
+not in the page. They are invisible to CDP page screenshots, and
+`Input.dispatchMouseEvent` coordinates go to the viewport — they can't click the popup.
+
+CDP event coverage is uneven: `Page.javascriptDialogOpening` (alerts + beforeunload),
+`Page.fileChooserOpened` (requires `Page.enable({enableFileChooserOpenedEvent: true})`),
+and `Page.downloadWillBegin` do fire. **Permission popups (geolocation, notifications,
+camera/mic, ...) emit no CDP event at all** — which is why the harness injects an
+in-page wrapper to surface them.
 
 Two things to know:
 
@@ -63,6 +69,17 @@ Permission names: `geolocation`, `notifications`, `videoCapture`, `audioCapture`
 
 ```python
 cdp("Browser.resetPermissions")          # back to 'prompt' for all origins
+```
+
+`Browser.setPermission` is the finer-grained alternative — sets one permission at a
+time with explicit `setting: 'granted' | 'denied' | 'prompt'`, useful for toggling
+mid-session or explicitly denying:
+
+```python
+cdp("Browser.setPermission",
+    permission={"name": "geolocation"},
+    setting="denied",
+    origin="https://www.example.com")
 ```
 
 ## Dismissing a popup that already opened

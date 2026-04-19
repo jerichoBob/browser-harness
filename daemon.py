@@ -161,8 +161,11 @@ class Daemon:
         log(f"attached {pages[0]['targetId']} ({pages[0].get('url','')[:80]}) session={self.session}")
         for d in ("Page", "DOM", "Runtime", "Network"):
             try:
+                # Page.enable takes enableFileChooserOpenedEvent — off by default,
+                # so without it Page.fileChooserOpened never fires (CDP experimental).
+                params = {"enableFileChooserOpenedEvent": True} if d == "Page" else {}
                 await asyncio.wait_for(
-                    self.cdp.send_raw(f"{d}.enable", session_id=self.session),
+                    self.cdp.send_raw(f"{d}.enable", params, session_id=self.session),
                     timeout=5
                 )
             except Exception as e:
