@@ -5,15 +5,15 @@ Manus (`manus.im`) is a general-purpose agent that runs long-form tasks in a clo
 ## URL patterns
 
 - App home / new-task composer: `https://manus.im/app`
-- Running or completed task: `https://manus.im/app/<taskId>` — `<taskId>` is a 22-char base62-ish opaque id (e.g. `JzEYr0uc9iupMNa6TVkpxv`). The same id is the session id on the API side.
+- Running or completed task: `https://manus.im/app/<taskId>` — `<taskId>` is a 22-char base62-ish opaque id (character set includes letters, digits, and `-`/`_`). The same id is the session id on the API side.
 - Public share page: `https://manus.im/share/<taskId>` — only reachable after a `ShareSession` call (clicking *Share*).
 - Library / past tasks: listed in the left sidebar; the list is paged via `session.v1.SessionService/ListSessions`.
 
-The title of a task page is auto-summarized from the prompt (e.g. prompt `"reply with just the word PONG"` → title `"Reply with PONG"`). Do **not** match on the original prompt when identifying a task in the sidebar — use the taskId in the URL.
+The title of a task page is auto-summarized from the prompt (it shortens, reflows, and sometimes paraphrases). Do **not** match on the original prompt text when identifying a task in the sidebar — use the taskId in the URL as the durable handle.
 
 ## Path 1: Private API — `api.manus.im` Connect RPC
 
-All API calls go to `https://api.manus.im/` with the Connect RPC shape `/<package>.v<N>.<Service>/<Method>`. Requests are POST with `content-type: application/json`; bodies are Connect-encoded (short binary) and responses are JSON. Auth is a session cookie set by `manus.im`, so in-browser calls Just Work if you're logged in — `fetch("/session.v1.SessionService/...")` from the Manus origin is fine, but cross-origin from a scraper is not.
+All API calls go to `https://api.manus.im/` with the Connect RPC shape `/<package>.v<N>.<Service>/<Method>`. Requests are POST with `content-type: application/json`; the Connect JS client encodes request JSON as a `Uint8Array` before calling `fetch`, so a naive fetch-hook may log bodies as `<<bytes:N>>` — the wire content is still JSON matching the content-type (both directions). Auth is a session cookie set by `manus.im`, so in-browser calls Just Work if you're logged in — `fetch("/session.v1.SessionService/...")` from the Manus origin is fine, but cross-origin from a scraper is not.
 
 Services observed on the wire:
 
@@ -54,8 +54,12 @@ browser-harness <<'PY'
 new_tab("https://manus.im/app")
 wait_for_load()
 wait(1.5)  # SPA still hydrating; composer is a TipTap editor that mounts late
-# Composer is center of viewport. Click into the editor, then type.
-click(750, 505)
+# Locate the editor and click into it — the ProseMirror div is the contenteditable.
+rect = js(r"""
+(()=>{const ce=document.querySelector('div.ProseMirror[contenteditable="true"]');
+const r=ce.getBoundingClientRect();return {x:r.x+r.width/2|0,y:r.y+r.height/2|0}})()
+""")
+click(rect["x"], rect["y"])
 wait(0.3)
 type_text("Research the top 5 espresso machines under $500 and summarize tradeoffs")
 wait(0.4)
@@ -148,7 +152,7 @@ Notes on the Share flow:
 - **`__NEXT_DATA__` is present but empty on `/app/<id>`.** The task state is hydrated via Connect RPC after mount. Don't parse Next's inline JSON for task data — it isn't there.
 - **Sidebar nav items are `<div>`, not `<a>`.** Click by finding the element whose `innerText` matches `"New task"` / `"Search"` / `"Library"` and using its bounding rect. `location.href` changes won't be reflected in `<a href>` attributes.
 - **Task titles are auto-generated from the prompt.** If the exact prompt text matters for lookup, store the returned `taskId` (from the URL after submit) — do not grep the sidebar by prompt text.
-- **Connect RPC request bodies look like binary over `content-type: application/json`.** That is expected — Connect serializes protobuf-ish binary and advertises JSON when using the JSON codec. Responses are real JSON.
+- **Connect RPC request bodies look binary in a naive fetch-hook.** The Connect JS client serializes request JSON into a `Uint8Array` before handing it to `fetch`, so `body instanceof Uint8Array` is `true` even though the wire content is JSON. Decode with `new TextDecoder().decode(body)` if you need to see it; content-type (`application/json`) matches reality.
 - **Task submit fires no obvious single "CreateSession" RPC in the page's fetch stream** — the initial create is done in the SPA's state transition that routes you to `/app/<id>`. Follow-on streaming updates arrive through `SessionService/GetSession` polls (and likely a WebSocket — install a WS hook if you need the wire format).
 - **"Task completed" is the only DOM marker for terminal state.** Failed / cancelled tasks may surface different text — if you hit one, extend this skill.
 - **Cloud PC / Computer Use tasks** (when the monitor icon in the composer is toggled) spawn a sandbox VM and stream a VNC-like view into an iframe. Scraping that iframe is out of scope for this skill — see `interaction-skills/iframes.md` if you need to drive it.

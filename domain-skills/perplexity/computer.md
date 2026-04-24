@@ -8,9 +8,9 @@ You must be signed in before the harness can drive it. Computer is a paid featur
 
 - Dashboard / task list: `https://www.perplexity.ai/computer/tasks`
 - Task detail (run page): `https://www.perplexity.ai/computer/tasks/<slug>-<id>`
-  - `<slug>` is a kebab-case auto-summary of the prompt (e.g. `ai-browser-agents-comparison`)
-  - `<id>` is a 22-char base62-ish opaque id (e.g. `M_5rbl6jRnu7NwuoDoDvtg`)
-  - The full last segment is `<slug>-<id>` joined with a `-`; there's no separator character beyond that.
+  - `<slug>` is a kebab-case auto-summary of the prompt (typically 3–6 words from the title).
+  - `<id>` is a 22-char base62-ish opaque id (character set includes letters, digits, `-`, and `_`).
+  - The full last segment is `<slug>-<id>` joined with a `-`; there's no separator character beyond that. Strip the trailing 22 chars to recover just the id.
 - Connectors: `https://www.perplexity.ai/computer/connectors`
 - Custom skills: `https://www.perplexity.ai/computer/skills`
 - Public share: the same task URL with `?view=thread` appended (e.g. `https://www.perplexity.ai/computer/tasks/<slug>-<id>?view=thread`). There is **no separate `/share/<id>` path** — the access level is toggled server-side and the `view=thread` query just opens the thread view for unauthenticated viewers.
@@ -116,26 +116,34 @@ Each tool step is rendered as a collapsible row with a leading icon, a short lab
 
 ### Todo panel (agent plan)
 
-Click the `"Todo"` top-bar button — a floating panel opens with the plan items.
+Click the `"Todo"` top-bar button — a floating panel opens with the plan items. The Todo button is a Radix trigger: it carries `data-state="closed"|"open"`, `aria-expanded`, and `aria-controls="<radix-id>"`. The open panel is mounted as a portal element whose `id` equals the button's `aria-controls` — use that to scope queries to the panel only.
 
 ```python
+def todo_panel():
+    return js(r"""
+    (()=>{
+      const btn = [...document.querySelectorAll('button')].find(x=>x.innerText?.trim()==='Todo');
+      if(!btn || btn.getAttribute('data-state') !== 'open') return null;
+      const id = btn.getAttribute('aria-controls');
+      return id ? document.getElementById(id) : null;
+    })()
+    """)
+
+# Open and read the plan
 click(*top_button_rect("Todo").values())
 wait(1)
 plan = js(r"""
 (()=>{
-  // The Todo popover — find the panel with a plan title + bullet items
-  const pop = [...document.querySelectorAll('*')].find(el => {
-    const t = el.innerText || '';
-    return /Sub-agent \d+:/.test(t) && t.length < 2000;
-  });
-  if(!pop) return null;
-  return (pop.innerText||'').trim();
+  const btn = [...document.querySelectorAll('button')].find(x=>x.innerText?.trim()==='Todo');
+  const id = btn?.getAttribute('aria-controls');
+  const panel = id ? document.getElementById(id) : null;
+  return panel ? (panel.innerText||'').trim() : null;
 })()
 """)
 print(plan)
 ```
 
-Plan items render with a green check SVG (completed) or an empty circle (pending). The plan title sits at the top of the panel as plain text; each step is a separate row.
+Plan items render with a green check SVG (completed — `<use xlink:href="#pplx-icon-check">`) or an empty circle (pending). The plan title sits at the top of the panel as plain text; each step is a separate row with one status icon.
 
 ### Detecting task completion
 
@@ -143,19 +151,28 @@ There is no single `"Task completed"` marker like Manus. Terminal state is infer
 
 - the `"Insufficient credits"` banner (failure due to billing) containing the text `"Insufficient credits"` + an `Add credits` button, or
 - the final tool invocation's duration stops ticking and a markdown report section appears, or
-- polling the Todo panel — all items show a green check (no empty circles).
+- polling the Todo panel — every row's status icon is `#pplx-icon-check` (no pending circles or alerts).
 
-If you are driving Computer tasks programmatically, prefer polling the Todo panel:
+If you are driving Computer tasks programmatically, prefer polling the Todo panel. **Do not query `svg use` on `document`** — the page has dozens of icons outside the Todo panel (tool-invocation rows, sidebar, top bar), and a global count produces meaningless completion state. Scope every icon query to the Radix panel:
 
 ```python
 def all_todo_done():
     return js(r"""
-    (()=>{const items = [...document.querySelectorAll('svg use')]
-      .filter(u => /icon-(check|circle|alert)/.test(u.getAttribute('xlink:href')||''));
-    // Each todo row has one status icon. If none are 'circle' (pending), it's done.
-    return items.length > 0 && !items.some(u => /icon-circle/.test(u.getAttribute('xlink:href')||''));})()
+    (()=>{
+      const btn = [...document.querySelectorAll('button')].find(x=>x.innerText?.trim()==='Todo');
+      if(!btn || btn.getAttribute('data-state') !== 'open') return null;  // panel closed — open it first
+      const id = btn.getAttribute('aria-controls');
+      const panel = id ? document.getElementById(id) : null;
+      if(!panel) return null;
+      const icons = [...panel.querySelectorAll('svg use')]
+        .map(u => u.getAttribute('xlink:href')||'');
+      if(icons.length === 0) return false;  // panel still hydrating
+      return icons.every(h => /#pplx-icon-check/.test(h));
+    })()
     """)
 ```
+
+This returns `None` when the panel is closed (you need to open it first) or still hydrating, `True` only when every row in the Todo panel shows the check icon.
 
 ### Extracting the final report
 
