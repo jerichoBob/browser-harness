@@ -1,4 +1,4 @@
-import sys
+import os, sys
 
 from admin import (
     _version,
@@ -51,6 +51,9 @@ def main():
     if args and args[0] == "--update":
         yes = any(a in {"-y", "--yes"} for a in args[1:])
         sys.exit(run_update(yes=yes))
+    if args and args[0] == "--debug-clicks":
+        os.environ["BH_DEBUG_CLICKS"] = "1"
+        args = args[1:]
     if not args or args[0] != "-c":
         sys.exit("Usage: browser-harness -c \"print(page_info())\"")
     print_update_banner()

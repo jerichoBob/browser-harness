@@ -67,7 +67,27 @@ def page_info():
     return json.loads(r["result"]["value"])
 
 # --- input ---
+_debug_click_counter = 0
+
 def click_at_xy(x, y, button="left", clicks=1):
+    if os.environ.get("BH_DEBUG_CLICKS"):
+        global _debug_click_counter
+        try:
+            from PIL import Image, ImageDraw
+            dpr = js("window.devicePixelRatio") or 1
+            path = capture_screenshot(f"/tmp/debug_click_{_debug_click_counter}.png")
+            img = Image.open(path)
+            draw = ImageDraw.Draw(img)
+            px, py = int(x * dpr), int(y * dpr)
+            r = int(15 * dpr)
+            draw.ellipse([px - r, py - r, px + r, py + r], outline="red", width=int(3 * dpr))
+            draw.line([px - r - int(5 * dpr), py, px + r + int(5 * dpr), py], fill="red", width=int(2 * dpr))
+            draw.line([px, py - r - int(5 * dpr), px, py + r + int(5 * dpr)], fill="red", width=int(2 * dpr))
+            img.save(path)
+            print(f"[debug_click] saved {path} (x={x}, y={y}, dpr={dpr})")
+        except Exception as e:
+            print(f"[debug_click] overlay failed: {e}")
+        _debug_click_counter += 1
     cdp("Input.dispatchMouseEvent", type="mousePressed", x=x, y=y, button=button, clickCount=clicks)
     cdp("Input.dispatchMouseEvent", type="mouseReleased", x=x, y=y, button=button, clickCount=clicks)
 
