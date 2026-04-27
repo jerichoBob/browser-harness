@@ -31,6 +31,7 @@ PROFILES = [
     Path.home() / "Library/Application Support/Microsoft Edge Beta",
     Path.home() / "Library/Application Support/Microsoft Edge Dev",
     Path.home() / "Library/Application Support/Microsoft Edge Canary",
+    Path.home() / "Library/Application Support/BraveSoftware/Brave-Browser",
     Path.home() / ".config/google-chrome",
     Path.home() / ".config/chromium",
     Path.home() / ".config/chromium-browser",
@@ -82,6 +83,12 @@ def get_ws_url():
             finally:
                 probe.close()
         return f"ws://127.0.0.1:{port.strip()}{path.strip()}"
+    for probe_port in (9222, 9223):
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{probe_port}/json/version", timeout=1) as r:
+                return json.loads(r.read())["webSocketDebuggerUrl"]
+        except (OSError, KeyError, ValueError):
+            continue
     raise RuntimeError(f"DevToolsActivePort not found in {[str(p) for p in PROFILES]} — enable chrome://inspect/#remote-debugging, or set BU_CDP_WS for a remote browser")
 
 
