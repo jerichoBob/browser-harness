@@ -118,9 +118,17 @@ def scroll(x, y, dy=-300, dx=0):
 
 
 # --- visual ---
-def capture_screenshot(path="/tmp/shot.png", full=False):
+def capture_screenshot(path="/tmp/shot.png", full=False, max_dim=None):
+    """Save a PNG of the current viewport. Set max_dim=1800 on a 2× display to
+    keep the file under the 2000px-per-side limit some image-aware LLMs enforce."""
     r = cdp("Page.captureScreenshot", format="png", captureBeyondViewport=full)
     open(path, "wb").write(base64.b64decode(r["data"]))
+    if max_dim:
+        from PIL import Image
+        img = Image.open(path)
+        if max(img.size) > max_dim:
+            img.thumbnail((max_dim, max_dim))
+            img.save(path)
     return path
 
 
