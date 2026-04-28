@@ -1,4 +1,4 @@
-import admin
+from browser_harness import admin
 
 
 def test_local_chrome_mode_is_false_when_env_provides_remote_cdp():

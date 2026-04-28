@@ -3,14 +3,20 @@ import asyncio, json, os, socket, sys, time, urllib.request
 from collections import deque
 from pathlib import Path
 
-import _ipc as ipc
+from . import _ipc as ipc
 from cdp_use.client import CDPClient
 
 
 def _load_env():
-    p = Path(__file__).parent / ".env"
-    if not p.exists():
-        return
+    repo_root = Path(__file__).resolve().parents[2]
+    workspace = Path(os.environ.get("BH_AGENT_WORKSPACE", repo_root / "agent-workspace")).expanduser()
+    for p in (repo_root / ".env", workspace / ".env"):
+        if not p.exists():
+            continue
+        _load_env_file(p)
+
+
+def _load_env_file(p):
     for line in p.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:

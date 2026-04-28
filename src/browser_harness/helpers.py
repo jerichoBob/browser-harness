@@ -1,15 +1,29 @@
-"""Browser control via CDP. Read, edit, extend -- this file is yours."""
-import base64, json, os, tempfile, time, urllib.request
+"""Browser control via CDP.
+
+Core helpers live here. Agent-editable helpers live in
+BH_AGENT_WORKSPACE/agent_helpers.py.
+"""
+import base64, importlib.util, json, os, tempfile, time, urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
-import _ipc as ipc
+from . import _ipc as ipc
+
+
+CORE_DIR = Path(__file__).resolve().parent
+REPO_ROOT = CORE_DIR.parent.parent
+AGENT_WORKSPACE = Path(os.environ.get("BH_AGENT_WORKSPACE", REPO_ROOT / "agent-workspace")).expanduser()
 
 
 def _load_env():
-    p = Path(__file__).parent / ".env"
-    if not p.exists():
-        return
+    paths = [REPO_ROOT / ".env", AGENT_WORKSPACE / ".env"]
+    for p in paths:
+        if not p.exists():
+            continue
+        _load_env_file(p)
+
+
+def _load_env_file(p):
     for line in p.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -50,7 +64,7 @@ def drain_events():  return _send({"meta": "drain_events"})["events"]
 # --- navigation / page ---
 def goto_url(url):
     r = cdp("Page.navigate", url=url)
-    d = (Path(__file__).parent / "domain-skills" / (urlparse(url).hostname or "").removeprefix("www.").split(".")[0])
+    d = (AGENT_WORKSPACE / "domain-skills" / (urlparse(url).hostname or "").removeprefix("www.").split(".")[0])
     return {**r, "domain_skills": sorted(p.name for p in d.rglob("*.md"))[:10]} if d.is_dir() else r
 
 def page_info():
@@ -262,3 +276,21 @@ def http_get(url, headers=None, timeout=20.0):
         data = r.read()
         if r.headers.get("Content-Encoding") == "gzip": data = gzip.decompress(data)
         return data.decode()
+
+
+def _load_agent_helpers():
+    p = AGENT_WORKSPACE / "agent_helpers.py"
+    if not p.exists():
+        return
+    spec = importlib.util.spec_from_file_location("browser_harness_agent_helpers", p)
+    if not spec or not spec.loader:
+        return
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    for name, value in vars(module).items():
+        if name.startswith("_"):
+            continue
+        globals()[name] = value
+
+
+_load_agent_helpers()

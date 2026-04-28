@@ -7,7 +7,7 @@ if hasattr(sys.stdout, "reconfigure"):
     try: sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception: pass
 
-from admin import (
+from .admin import (
     _version,
     ensure_daemon,
     list_cloud_profiles,
@@ -21,17 +21,17 @@ from admin import (
     stop_remote_daemon,
     sync_local_profile,
 )
-from helpers import *
+from .helpers import *
 
 HELP = """Browser Harness
 
 Read SKILL.md for the default workflow and examples.
 
 Typical usage:
-  uv run bh <<'PY'
+  browser-harness -c '
   ensure_real_tab()
   print(page_info())
-  PY
+  '
 
 Helpers are pre-imported. The daemon auto-starts and connects to the running browser.
 

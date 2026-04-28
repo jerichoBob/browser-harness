@@ -6,13 +6,19 @@ import time
 import urllib.request
 from pathlib import Path
 
-import _ipc as ipc
+from . import _ipc as ipc
 
 
 def _load_env():
-    p = Path(__file__).parent / ".env"
-    if not p.exists():
-        return
+    repo_root = Path(__file__).resolve().parents[2]
+    workspace = Path(os.environ.get("BH_AGENT_WORKSPACE", repo_root / "agent-workspace")).expanduser()
+    for p in (repo_root / ".env", workspace / ".env"):
+        if not p.exists():
+            continue
+        _load_env_file(p)
+
+
+def _load_env_file(p):
     for line in p.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -96,8 +102,7 @@ def ensure_daemon(wait=60.0, name=None, env=None):
     for attempt in (0, 1):
         e = {**os.environ, **({"BU_NAME": name} if name else {}), **(env or {})}
         p = subprocess.Popen(
-            ["uv", "run", "daemon.py"],
-            cwd=os.path.dirname(os.path.abspath(__file__)),
+            [sys.executable, "-m", "browser_harness.daemon"],
             env=e, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **ipc.spawn_kwargs(),
         )
         deadline = time.time() + wait
@@ -350,8 +355,10 @@ def _version():
 
 def _repo_dir():
     """Return the repo root if this install is an editable git clone, else None."""
-    p = Path(__file__).resolve().parent
-    return p if (p / ".git").is_dir() else None
+    for p in Path(__file__).resolve().parents:
+        if (p / ".git").is_dir():
+            return p
+    return None
 
 
 def _install_mode():

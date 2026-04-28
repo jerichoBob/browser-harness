@@ -4,12 +4,12 @@ from unittest.mock import patch
 
 from PIL import Image
 
-import helpers
+from browser_harness import helpers
 
 
 def _run(fake_png, width, height, **kwargs):
     fake = lambda method, **_: {"data": fake_png(width, height)}
-    with patch("helpers.cdp", side_effect=fake), tempfile.TemporaryDirectory() as d:
+    with patch("browser_harness.helpers.cdp", side_effect=fake), tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "shot.png")
         helpers.capture_screenshot(path, **kwargs)
         return Image.open(path).size
