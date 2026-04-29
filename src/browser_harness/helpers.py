@@ -3,7 +3,7 @@
 Core helpers live here. Agent-editable helpers live in
 BH_AGENT_WORKSPACE/agent_helpers.py.
 """
-import base64, importlib.util, json, math, os, time, urllib.request
+import base64, importlib.util, json, math, os, sys, time, urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -214,7 +214,7 @@ def fill_input(selector, text, clear_first=True):
     """
     js(f"document.querySelector({json.dumps(selector)})?.focus()")
     if clear_first:
-        press_key("a", modifiers=2)  # Ctrl+A
+        press_key("a", modifiers=4 if sys.platform == "darwin" else 2)  # Cmd+A on macOS, Ctrl+A elsewhere
         press_key("Backspace")
     for ch in text:
         press_key(ch)
@@ -351,7 +351,9 @@ def wait_for_element(selector, timeout=10.0, visible=False):
     if visible:
         check = (
             f"(()=>{{const e=document.querySelector({json.dumps(selector)});"
-            f"return !!(e&&e.offsetParent!==null&&getComputedStyle(e).visibility!=='hidden')}})()"
+            f"if(!e)return false;"
+            f"const s=getComputedStyle(e);"
+            f"return s.display!=='none'&&s.visibility!=='hidden'&&s.opacity!=='0'}})()"
         )
     else:
         check = f"!!document.querySelector({json.dumps(selector)})"
@@ -362,7 +364,7 @@ def wait_for_element(selector, timeout=10.0, visible=False):
     return False
 
 def wait_for_network_idle(timeout=10.0, idle_ms=500):
-    """Wait until no Network.* events arrive for idle_ms ms, then return True.
+    """Wait until all in-flight requests finish and no Network.* events arrive for idle_ms ms.
 
     Useful after form submits, SPA route transitions, and any action that triggers
     XHR/fetch without a visible DOM change. Builds on drain_events() — no daemon changes.
@@ -370,11 +372,20 @@ def wait_for_network_idle(timeout=10.0, idle_ms=500):
     """
     deadline = time.time() + timeout
     last_activity = time.time()
+    inflight = set()
     while time.time() < deadline:
-        events = drain_events()
-        if any(e.get("method", "").startswith("Network.") for e in events):
-            last_activity = time.time()
-        if (time.time() - last_activity) * 1000 >= idle_ms:
+        for e in drain_events():
+            method = e.get("method", "")
+            params = e.get("params", {})
+            if method == "Network.requestWillBeSent":
+                inflight.add(params.get("requestId"))
+                last_activity = time.time()
+            elif method in ("Network.loadingFinished", "Network.loadingFailed"):
+                inflight.discard(params.get("requestId"))
+                last_activity = time.time()
+            elif method.startswith("Network."):
+                last_activity = time.time()
+        if not inflight and (time.time() - last_activity) * 1000 >= idle_ms:
             return True
         time.sleep(0.1)
     return False
