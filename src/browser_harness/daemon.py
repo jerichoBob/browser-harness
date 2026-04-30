@@ -105,24 +105,17 @@ def get_ws_url():
         # with a different --user-data-dir on the same port, that file is left behind
         # with a stale browser UUID and the WS upgrade returns 404.
         deadline = time.time() + 30
-        saw_http_404 = False
         while time.time() < deadline:
             try:
                 return json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1).read())["webSocketDebuggerUrl"]
             except urllib.error.HTTPError as e:
-                if e.code == 404:
-                    # Chrome 147+ disables /json/* HTTP discovery when remote debugging
-                    # runs on the default user-data-dir (IsUsingDefaultDataDirectory check).
-                    # The websocket itself still works; fall back to the path Chrome wrote
-                    # to DevToolsActivePort, which is fresh because Chrome rewrites it on
-                    # every launch.
-                    saw_http_404 = True
-                    break
+                # Chrome 147+ disables /json/* HTTP discovery on the default user-data-dir;
+                # the ws path Chrome wrote to DevToolsActivePort still works.
+                if e.code == 404 and ws_path:
+                    return f"ws://127.0.0.1:{port}{ws_path}"
                 time.sleep(1)
             except (OSError, KeyError, ValueError):
                 time.sleep(1)
-        if saw_http_404 and ws_path:
-            return f"ws://127.0.0.1:{port}{ws_path}"
         raise RuntimeError(
             f"Chrome's remote-debugging page is open, but DevTools is not live yet on 127.0.0.1:{port} — if Chrome opened a profile picker, choose your normal profile first, then tick the checkbox and click Allow if shown"
         )
