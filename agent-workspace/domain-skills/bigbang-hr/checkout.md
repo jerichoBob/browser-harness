@@ -89,6 +89,10 @@ The SPA preserves JS state across checkout steps (client-side routing), so a pus
 
 ```javascript
 window.__dlEvents = [];
+// Seed dataLayer first — GTM may not have loaded yet when the snippet runs,
+// in which case window.dataLayer is undefined and .push.bind would throw.
+// Seeding with [] is safe: GTM picks up an existing array on init.
+window.dataLayer = window.dataLayer || [];
 const origPush = window.dataLayer.push.bind(window.dataLayer);
 window.dataLayer.push = function() {
     for (let i = 0; i < arguments.length; i++) {
