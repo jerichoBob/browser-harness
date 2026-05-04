@@ -69,7 +69,9 @@ resp = http_get(
     "https://vercel.com/api/v3/deployments/" + uid + "/events?builds=1&limit=5000&teamId=<team-slug>",
     headers=headers
 )
-# Set limit >= the "N lines" count shown in the Build Logs accordion header to avoid truncation.
+# No pagination cursor in response — all events returned in one shot.
+# limit=5000 is a safe ceiling. limit=-1 does NOT work (returns empty).
+# API event count differs from the "N lines" shown in the UI header — do not use that as limit.
 # Response is a JSON array, one object per line, separated by ",\n"
 lines = [l.strip().rstrip(",") for l in resp.strip().split("\n") if l.strip() not in ("[", "]", "")]
 events = [json.loads(l) for l in lines]
@@ -107,7 +109,7 @@ Tabs across the top: **Deployment** | Logs | Resources | Source | Open Graph
 
 Accordion sections (all expand on click):
 1. **Deployment Settings** — build machine, Node.js version, protection, etc. Shows "N Recommendations" badge when Vercel has upsell suggestions.
-2. **Build Logs** — header shows duration + `N lines` (total line count) + warning count + ✅/❌. The `N lines` value tells you what to pass as `limit` to the API. Content is a **virtual list — only visible rows are in the DOM**. Use the API endpoint above to get all lines.
+2. **Build Logs** — header shows duration + `N lines` (UI line count) + warning count + ✅/❌. Content is a **virtual list — only visible rows are in the DOM**. Use the API endpoint above to get all lines. Note: the UI line count does not equal the API event count.
 3. **Deployment Summary** — resource breakdown
 4. **Deployment Checks** — external check integrations
 5. **Assigning Custom Domains** — alias assignment status
