@@ -137,6 +137,8 @@ def main() -> int:
                     stopped += 1
                 except urllib.error.HTTPError as e:
                     record["action"] = f"stop_failed: HTTP {e.code}"
+                except urllib.error.URLError as e:
+                    record["action"] = f"stop_failed: {e.reason}"
 
         if args.json:
             print(json.dumps(record))
