@@ -504,11 +504,10 @@ def test_restart_daemon_skips_sigterm_when_start_time_changed_during_wait(monkey
 # --- _process_start_time helper ---
 
 def test_process_start_time_returns_stable_fingerprint_for_self():
-    """The start-time of the current process should be readable on POSIX and
-    stable across two reads. (Skipped on Windows where the helper returns None
-    by design.)"""
+    """The start-time of the current process should be readable on Linux,
+    macOS, and Windows, and stable across two reads."""
     import os as _os, sys
-    if sys.platform.startswith("linux") or sys.platform == "darwin":
+    if sys.platform.startswith("linux") or sys.platform == "darwin" or sys.platform == "win32":
         pid = _os.getpid()
         first = admin._process_start_time(pid)
         second = admin._process_start_time(pid)

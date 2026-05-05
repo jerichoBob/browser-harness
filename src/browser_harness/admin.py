@@ -21,12 +21,13 @@ def _process_start_time(pid):
     remote shutdown), without falling back to "trust the pid file" — which
     would re-introduce the PID-reuse hazard.
 
-    Linux: /proc/<pid>/stat field 22 (starttime in clock ticks since boot).
-    macOS: `ps -o lstart= -p <pid>` (an absolute timestamp string).
-    Other platforms: returns None; restart_daemon falls back to its strict
+    Linux:   /proc/<pid>/stat field 22 (starttime in clock ticks since boot).
+    macOS:   `ps -o lstart= -p <pid>` (an absolute timestamp string).
+    Windows: GetProcessTimes via ctypes (FILETIME creation time, 100-ns since 1601).
+    Anywhere else: returns None; restart_daemon falls back to its strict
     identify-only check, which is safer than no check at all.
     """
-    if not isinstance(pid, int) or pid <= 0:
+    if type(pid) is not int or pid <= 0:
         return None
     if sys.platform.startswith("linux"):
         try:
@@ -51,6 +52,53 @@ def _process_start_time(pid):
             return None
         s = out.decode("ascii", errors="replace").strip()
         return s or None
+    if sys.platform == "win32":
+        # Windows users running a remote daemon hit the same slow-shutdown
+        # window as POSIX (stop_remote() PATCHes api.browser-use.com after
+        # the IPC socket has been torn down). Without a fingerprint here the
+        # SIGTERM gate can never pass during that window, leaving an orphan
+        # daemon that may continue to hold a billed cloud browser. Use
+        # GetProcessTimes via ctypes to read the kernel-reported creation
+        # time as a 64-bit FILETIME (100-ns intervals since 1601-01-01).
+        try:
+            import ctypes
+            from ctypes import wintypes
+        except ImportError:
+            return None
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        try:
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel32.OpenProcess.restype = wintypes.HANDLE
+            kernel32.GetProcessTimes.argtypes = [
+                wintypes.HANDLE,
+                ctypes.POINTER(wintypes.FILETIME),
+                ctypes.POINTER(wintypes.FILETIME),
+                ctypes.POINTER(wintypes.FILETIME),
+                ctypes.POINTER(wintypes.FILETIME),
+            ]
+            kernel32.GetProcessTimes.restype = wintypes.BOOL
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.CloseHandle.restype = wintypes.BOOL
+        except (OSError, AttributeError):
+            return None
+        h = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not h:
+            return None
+        try:
+            creation = wintypes.FILETIME()
+            exit_ft = wintypes.FILETIME()
+            kernel_ft = wintypes.FILETIME()
+            user_ft = wintypes.FILETIME()
+            ok = kernel32.GetProcessTimes(
+                h, ctypes.byref(creation), ctypes.byref(exit_ft),
+                ctypes.byref(kernel_ft), ctypes.byref(user_ft),
+            )
+            if not ok:
+                return None
+            return (creation.dwHighDateTime << 32) | creation.dwLowDateTime
+        finally:
+            kernel32.CloseHandle(h)
     return None
 
 
