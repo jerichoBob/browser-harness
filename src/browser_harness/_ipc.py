@@ -97,9 +97,48 @@ def ping(name, timeout=1.0):
     except (FileNotFoundError, ConnectionRefusedError, TimeoutError, socket.timeout, OSError):
         return False
     try:
-        return request(c, token, {"meta": "ping"}).get("pong") is True
-    except (OSError, ValueError):
+        resp = request(c, token, {"meta": "ping"})
+        # request() returns parsed JSON, which may be any valid value (a list,
+        # scalar, etc. from a stale or hostile endpoint). Anything that isn't
+        # a {pong: true} dict counts as "not our daemon" — never .get() blindly.
+        return isinstance(resp, dict) and resp.get("pong") is True
+    except (OSError, ValueError, AttributeError):
         return False
+    finally:
+        try: c.close()
+        except OSError: pass
+
+
+def identify(name, timeout=1.0):
+    """Return the live daemon's PID, or None if unreachable.
+
+    Used by restart_daemon() to signal a process whose identity has been
+    verified end-to-end (live IPC + self-reported PID), instead of trusting
+    a pid file whose number may have been reused by an unrelated process."""
+    try:
+        c, token = connect(name, timeout=timeout)
+    except (FileNotFoundError, ConnectionRefusedError, TimeoutError, socket.timeout, OSError):
+        return None
+    try:
+        resp = request(c, token, {"meta": "ping"})
+        # request() returns parsed JSON, which may be any valid value (a list,
+        # scalar, etc. from a stale or hostile endpoint). Anything that isn't
+        # a {pong: true} dict gets None — never .get() on a non-dict.
+        if not isinstance(resp, dict) or resp.get("pong") is not True:
+            return None
+        pid = resp.get("pid")
+        # `type(pid) is int` (not isinstance) intentionally rejects bool: in
+        # Python, isinstance(True, int) is True, so a hostile/buggy daemon
+        # could reply with {"pid": True} and we'd treat that as PID 1 (init).
+        # Also reject 0/negatives — os.kill(0, sig) signals every process in
+        # the calling process group, os.kill(-1, sig) signals every process
+        # the caller can. Upper bound is 2**31 because C pid_t is typically
+        # signed 32-bit and a value outside that range makes os.kill() raise
+        # OverflowError, which would propagate out of restart_daemon() before
+        # its cleanup. Linux pid_max is also bounded at 2**22 in practice.
+        return pid if type(pid) is int and 0 < pid < (1 << 31) else None
+    except (OSError, ValueError, AttributeError):
+        return None
     finally:
         try: c.close()
         except OSError: pass

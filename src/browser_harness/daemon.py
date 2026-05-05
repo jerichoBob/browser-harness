@@ -249,7 +249,9 @@ class Daemon:
         meta = req.get("meta")
         # Liveness probe — lets clients confirm the listener is actually this
         # daemon and not an unrelated process that reused our port post-crash.
-        if meta == "ping":        return {"pong": True}
+        # `pid` lets restart_daemon() verify the live daemon's identity before
+        # signaling — protects against SIGTERM-by-stale-pid-file after PID reuse.
+        if meta == "ping":        return {"pong": True, "pid": os.getpid()}
         if meta == "drain_events":
             out = list(self.events); self.events.clear()
             return {"events": out}
