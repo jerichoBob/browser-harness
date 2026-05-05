@@ -97,8 +97,12 @@ def ping(name, timeout=1.0):
     except (FileNotFoundError, ConnectionRefusedError, TimeoutError, socket.timeout, OSError):
         return False
     try:
-        return request(c, token, {"meta": "ping"}).get("pong") is True
-    except (OSError, ValueError):
+        resp = request(c, token, {"meta": "ping"})
+        # request() returns parsed JSON, which may be any valid value (a list,
+        # scalar, etc. from a stale or hostile endpoint). Anything that isn't
+        # a {pong: true} dict counts as "not our daemon" — never .get() blindly.
+        return isinstance(resp, dict) and resp.get("pong") is True
+    except (OSError, ValueError, AttributeError):
         return False
     finally:
         try: c.close()
@@ -126,7 +130,10 @@ def identify(name, timeout=1.0):
         # `type(pid) is int` (not isinstance) intentionally rejects bool: in
         # Python, isinstance(True, int) is True, so a hostile/buggy daemon
         # could reply with {"pid": True} and we'd treat that as PID 1 (init).
-        return pid if type(pid) is int else None
+        # Also reject 0 / negatives: os.kill(0, sig) signals every process in
+        # the calling process group; os.kill(-1, sig) signals every process
+        # the caller can. Only positive PIDs are safe to forward to os.kill.
+        return pid if type(pid) is int and pid > 0 else None
     except (OSError, ValueError, AttributeError):
         return None
     finally:
