@@ -268,6 +268,7 @@ def test_restart_daemon_does_not_signal_when_daemon_unreachable(monkeypatch, tmp
     kill_calls = []
     monkeypatch.setattr(admin.os, "kill", lambda pid, sig: kill_calls.append((pid, sig)))
     monkeypatch.setattr(admin.ipc, "identify", lambda name, timeout=5.0: None)
+    monkeypatch.setattr(admin.ipc, "ping", lambda name, timeout=1.0: False)
     monkeypatch.setattr(admin.ipc, "pid_path", lambda name: pid_path)
     monkeypatch.setattr(admin.ipc, "cleanup_endpoint", lambda name: None)
 
@@ -318,6 +319,7 @@ def test_restart_daemon_signals_pid_returned_by_identify_not_pid_file(monkeypatc
     fake = FakeIPC()
     monkeypatch.setattr(admin.os, "kill", fake_kill)
     monkeypatch.setattr(admin.ipc, "identify", fake.identify)
+    monkeypatch.setattr(admin.ipc, "ping", lambda name, timeout=1.0: True)
     monkeypatch.setattr(admin.ipc, "connect", fake.connect)
     monkeypatch.setattr(admin.ipc, "request", fake.request)
     monkeypatch.setattr(admin.ipc, "pid_path", fake.pid_path)
@@ -331,5 +333,88 @@ def test_restart_daemon_signals_pid_returned_by_identify_not_pid_file(monkeypatc
     assert pids_signaled == {live_pid}, (
         f"restart_daemon must only signal the PID returned by identify(); "
         f"signaled pids: {pids_signaled}, expected {{{live_pid}}} (and NOT 99999)"
+    )
+    assert not pid_path.exists()
+
+
+def test_restart_daemon_sends_shutdown_to_pre_upgrade_daemon_without_pid_in_ping(monkeypatch, tmp_path):
+    """Backward compat: a pre-upgrade daemon's ping reply has {pong:True} but
+    no `pid` field, so identify() returns None. The shutdown IPC must STILL be
+    sent (so the daemon exits cleanly), but no os.kill happens (we have no
+    verified PID to safely signal)."""
+    pid_path = tmp_path / "default.pid"
+    pid_path.write_text("99999")  # bogus stale value
+
+    kill_calls = []
+    shutdown_calls = []
+
+    def fake_request(conn, tok, msg):
+        if msg.get("meta") == "shutdown":
+            shutdown_calls.append(msg)
+        return {"ok": True}
+
+    monkeypatch.setattr(admin.os, "kill", lambda pid, sig: kill_calls.append((pid, sig)))
+    monkeypatch.setattr(admin.ipc, "identify", lambda name, timeout=5.0: None)
+    monkeypatch.setattr(admin.ipc, "ping", lambda name, timeout=1.0: True)  # old daemon: alive but no pid
+    monkeypatch.setattr(admin.ipc, "connect", lambda name, timeout: ("conn", "tok"))
+    monkeypatch.setattr(admin.ipc, "request", fake_request)
+    monkeypatch.setattr(admin.ipc, "pid_path", lambda name: pid_path)
+    monkeypatch.setattr(admin.ipc, "cleanup_endpoint", lambda name: None)
+
+    admin.restart_daemon("default")
+
+    assert shutdown_calls, (
+        "restart_daemon must send shutdown IPC to a pre-upgrade daemon even "
+        "when identify() can't return a PID — otherwise upgrades orphan the "
+        "old daemon while deleting its socket and pid file."
+    )
+    assert kill_calls == [], (
+        f"no os.kill should fire when we don't have a verified PID, "
+        f"but got: {kill_calls}"
+    )
+    assert not pid_path.exists()
+
+
+def test_restart_daemon_skips_sigterm_if_pid_was_reused_during_wait(monkeypatch, tmp_path):
+    """A second identify() runs immediately before the SIGTERM. If the daemon
+    exited and the PID was reused mid-wait, identify() will return None (or a
+    different PID) and we must NOT signal — that's the PID-reuse race during
+    the 15s wait window."""
+    import signal
+
+    pid_path = tmp_path / "default.pid"
+    pid_path.write_text("99999")
+    live_pid = 4242
+
+    kill_calls = []
+
+    def fake_kill(pid, sig):
+        kill_calls.append((pid, sig))
+        # All os.kill(pid, 0) probes succeed → loop exhausts → reaches the
+        # SIGTERM branch. (We're simulating a "wedged" daemon that the wait
+        # loop can't tell apart from a daemon whose PID got reused.)
+
+    # First identify() call (top of restart_daemon) returns the live PID.
+    # Second identify() call (right before SIGTERM) returns None — simulating
+    # the daemon having exited and its PID having been reused by an unrelated
+    # process. The function must NOT escalate to SIGTERM in that state.
+    identify_responses = iter([live_pid, None])
+    monkeypatch.setattr(admin.os, "kill", fake_kill)
+    monkeypatch.setattr(admin.ipc, "identify", lambda name, timeout=5.0: next(identify_responses))
+    monkeypatch.setattr(admin.ipc, "ping", lambda name, timeout=1.0: True)
+    monkeypatch.setattr(admin.ipc, "connect", lambda name, timeout: ("conn", "tok"))
+    monkeypatch.setattr(admin.ipc, "request", lambda conn, tok, msg: {"ok": True})
+    monkeypatch.setattr(admin.ipc, "pid_path", lambda name: pid_path)
+    monkeypatch.setattr(admin.ipc, "cleanup_endpoint", lambda name: None)
+    # Speed up the wait loop so the test finishes quickly. The loop polls 75
+    # times at 0.2s = 15s; with sleep neutralized it runs in microseconds.
+    monkeypatch.setattr(admin.time, "sleep", lambda _s: None)
+
+    admin.restart_daemon("default")
+
+    sigterms = [(pid, sig) for pid, sig in kill_calls if sig == signal.SIGTERM]
+    assert sigterms == [], (
+        f"restart_daemon issued SIGTERM despite the re-verify identify() "
+        f"returning None (PID was reused during the 15s wait). Calls: {kill_calls}"
     )
     assert not pid_path.exists()

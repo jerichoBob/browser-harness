@@ -199,19 +199,26 @@ def restart_daemon(name=None):
     name = name or NAME
     pid_path = str(ipc.pid_path(name))
 
-    # Ask the daemon for its PID. Reaching this confirms (a) the listener
-    # at the IPC endpoint is alive AND (b) gives us the PID we'd need to
-    # signal if it doesn't exit cleanly. If we can't reach it, daemon_pid
-    # is None and we never signal.
+    # Two pieces of information are tracked separately:
+    #   - daemon_pid: the daemon's self-reported PID, or None. Only daemons
+    #     running this version (or newer) include `pid` in the ping response;
+    #     pre-upgrade daemons return {pong: True} only and yield None here.
+    #   - daemon_alive: whether ANY daemon answers ping. Keeps the shutdown
+    #     IPC path working across upgrades — without it, a still-running
+    #     pre-upgrade daemon would have its socket deleted out from under it
+    #     while the process stayed alive.
     daemon_pid = ipc.identify(name, timeout=5.0)
+    daemon_alive = daemon_pid is not None or ipc.ping(name, timeout=1.0)
 
-    if daemon_pid is not None:
+    if daemon_alive:
         try:
             c, token = ipc.connect(name, timeout=5.0)
             ipc.request(c, token, {"meta": "shutdown"})
             c.close()
         except Exception:
             pass
+
+    if daemon_pid is not None:
         for _ in range(75):
             try:
                 os.kill(daemon_pid, 0)
@@ -219,13 +226,16 @@ def restart_daemon(name=None):
             except (ProcessLookupError, OSError, SystemError):
                 break
         else:
-            # Daemon acknowledged shutdown but didn't exit in 15s — wedged.
-            # SIGTERM is safe because identify() just confirmed this PID is
-            # the live daemon, not an unrelated PID-reuse victim.
-            try:
-                os.kill(daemon_pid, signal.SIGTERM)
-            except (ProcessLookupError, OSError, SystemError):
-                pass
+            # Re-verify identity before escalating to SIGTERM: the daemon may
+            # have exited and had its PID reused mid-wait, in which case the
+            # original PID now belongs to an unrelated process. Only signal
+            # if identify() still returns the same PID — that's the only
+            # state where the kill is provably safe.
+            if ipc.identify(name, timeout=1.0) == daemon_pid:
+                try:
+                    os.kill(daemon_pid, signal.SIGTERM)
+                except (ProcessLookupError, OSError, SystemError):
+                    pass
 
     ipc.cleanup_endpoint(name)
     try:
