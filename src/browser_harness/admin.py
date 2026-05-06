@@ -168,15 +168,15 @@ def daemon_alive(name=None):
 
 
 def _daemon_endpoint_names():
-    # BH_TMP_DIR isolates one daemon per dir → no filename-prefix discovery,
-    # just check whether our local endpoint exists. Without BH_TMP_DIR, _TMP
-    # is the shared default (`/tmp` etc.) and we glob `bu-*.<suffix>` to find
-    # every daemon on the machine.
+    # BH_RUNTIME_DIR isolates one daemon per dir → no filename-prefix discovery,
+    # just check whether our local endpoint exists. Without BH_RUNTIME_DIR,
+    # _RUNTIME is the shared default (`/tmp` etc.) and we glob `bu-*.<suffix>`
+    # to find every daemon on the machine.
     suffix = ".port" if ipc.IS_WINDOWS else ".sock"
-    if ipc.BH_TMP_DIR:
-        return [NAME] if (ipc._TMP / f"bu{suffix}").exists() else []
+    if ipc.BH_RUNTIME_DIR:
+        return [NAME] if (ipc._RUNTIME / f"bu{suffix}").exists() else []
     names = []
-    for p in sorted(ipc._TMP.glob(f"bu-*{suffix}")):
+    for p in sorted(ipc._RUNTIME.glob(f"bu-*{suffix}")):
         raw = p.name[3:-len(suffix)]
         try:
             ipc._check(raw)
