@@ -191,6 +191,39 @@ def click_canvas_percent(selector, x_pct, y_pct):
 Now the task can say `click_canvas_percent("canvas.map", 0.72, 0.41)` instead of
 carrying brittle absolute coordinates through the rest of the run.
 
+## Edge-case benchmark
+
+Use [edge-case-benchmark.html](edge-case-benchmark.html) to test the four
+patterns on a single page: hidden file upload, drag/drop event payloads,
+signature canvas, and a coordinate-only canvas target.
+
+For a normal local browser session:
+
+```python
+# browser-harness -c '...'
+from pathlib import Path
+
+new_tab(Path("docs/edge-case-benchmark.html").resolve().as_uri())
+wait_for_load()
+print(page_info())
+```
+
+On a remote Browser Use Cloud browser, local `file://` URLs are not available.
+Load the HTML into `about:blank` instead:
+
+```python
+# browser-harness -c '...'
+from pathlib import Path
+
+html = Path("docs/edge-case-benchmark.html").read_text()
+new_tab("about:blank")
+frame_id = cdp("Page.getFrameTree")["frameTree"]["frame"]["id"]
+cdp("Page.setDocumentContent", frameId=frame_id, html=html)
+```
+
+The benchmark exposes `window.bhBenchmarkResults()` so an agent can verify
+completion without relying on a visual guess.
+
 ## What to commit back
 
 Commit helpers that are durable and general enough to help the next run:
@@ -204,4 +237,3 @@ Commit helpers that are durable and general enough to help the next run:
 Do not commit secrets, user data, screenshots of private sessions, or fixed
 pixel coordinates from one viewport. Commit the durable map of how the site
 works, not the diary of one run.
-

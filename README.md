@@ -41,7 +41,7 @@ See [agent-workspace/domain-skills/](agent-workspace/domain-skills/) for example
 Read [Self-modifying Browser Harness](docs/self-modifying-harness.md) for the
 core workflow: when a task hits an edge case, the agent patches the harness and
 retries. The guide walks through file uploads, drag-and-drop, signature/canvas
-drawing, and coordinate-only controls.
+drawing, coordinate-only controls, and a local edge-case benchmark page.
 
 ## Free Browser Use Cloud browsers
 
